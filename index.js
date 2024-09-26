@@ -92,7 +92,7 @@ class Chain {
         }
     }
 }
-// Singleton instance as we only want 1 chain
+// Singleton instance as we only want 1 chain ..
 Chain.instance = new Chain();
 // Wallet class
 class Wallet {
