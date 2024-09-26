@@ -1,6 +1,6 @@
 import * as crypto from 'crypto'
 
-// Transaction class
+// Transaction class...
 class Transaction {
 
     constructor(
