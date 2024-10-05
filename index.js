@@ -14,24 +14,30 @@ var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (
 var __importStar = (this && this.__importStar) || function (mod) {
     if (mod && mod.__esModule) return mod;
     var result = {};
-    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
-    __setModuleDefault(result, mod);
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(m, k)) __createBinding(result, m, k);
+    __setModuleDefault(result, m);
     return result;
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const crypto = __importStar(require("crypto"));
+
+const MINING_REWARD = 50; // Reward for mining a block
+const TRANSACTION_FEE = 2;  // Fee paid to miners for processing the transaction
+
 // Transaction class
 class Transaction {
-    constructor(amount, payer, payee) {
+    constructor(amount, payer, payee, fee = TRANSACTION_FEE) {
         this.amount = amount;
         this.payer = payer;
         this.payee = payee;
+        this.fee = fee;
     }
     // Serialise transaction as a string
     toString() {
         return JSON.stringify(this);
     }
 }
+
 // Block class
 class Block {
     constructor(prevHash, transaction, ts = Date.now()) {
@@ -40,6 +46,7 @@ class Block {
         this.ts = ts;
         // Number only used once, used as the solution for mining
         this.numOnlyUsedOnce = Math.round(Math.random() * 999999999);
+        this.minerReward = MINING_REWARD;
     }
     // Getter method to return a hash of this block
     get hash() {
@@ -49,51 +56,85 @@ class Block {
         return hash.digest('hex');
     }
 }
+
 // Chain class
 class Chain {
     // Create genesis block
     constructor() {
         this.chain = [new Block('', new Transaction(100, 'genesis', 'godwin'))];
+        this.difficulty = 4; // Adjustable difficulty level
+        this.pendingTransactions = [];
+        this.miningReward = MINING_REWARD;
+        this.balances = {};  // Track wallet balances
     }
+
     // Return the last block in the chain
     get lastBlock() {
         return this.chain[this.chain.length - 1];
     }
+
+    // Adjust mining difficulty to control how hard it is to mine a block
+    adjustDifficulty() {
+        if (this.chain.length % 5 === 0) {
+            this.difficulty += 1; // Increment difficulty every 5 blocks
+        }
+    }
+
     // Mine a block to confirm it as a transaction on the blockchain
-    mine(numOnlyUsedOnce) {
+    mine(numOnlyUsedOnce, minerPublicKey) {
         let solution = 1;
-        console.log('🐢 Mining transaction...');
-        // Keep looping until solution is found
+        console.log('⛏️ Mining block...');
         while (true) {
             const hash = crypto.createHash('MD5');
             hash.update((numOnlyUsedOnce + solution).toString()).end();
             const attempt = hash.digest('hex');
-            // Add more 0's to make it harder
-            if (attempt.substr(0, 4) === '0000') {
-                console.log(`---> Solved transaction with solution: ${solution}. Block is confirmed!\n`);
+            if (attempt.substr(0, this.difficulty) === '0'.repeat(this.difficulty)) {
+                console.log(`Solved transaction with solution: ${solution}. Block is confirmed!`);
+                this.adjustDifficulty();
+                this.balances[minerPublicKey] = (this.balances[minerPublicKey] || 0) + MINING_REWARD;
                 return solution;
             }
             solution += 1;
         }
     }
+
     // Add a block to the blockchain
-    addBlock(transaction, senderPublicKey, signature) {
-        console.log("🐢 Sending TurtleCoin...");
-        // Verify a transaction before adding it
+    addBlock(transaction, senderPublicKey, signature, minerPublicKey) {
+        console.log("📤 Processing Transaction...");
         const verifier = crypto.createVerify('SHA256');
         verifier.update(transaction.toString());
         const isValid = verifier.verify(senderPublicKey, signature);
-        // If it is valid, create a block, mine it and add it to the blockchain
+        
         if (isValid) {
-            console.log("🐢 Transaction is valid!");
+            console.log("✅ Transaction is valid!");
+            if (!this.balances[senderPublicKey] || this.balances[senderPublicKey] < transaction.amount + transaction.fee) {
+                console.log("❌ Insufficient balance for transaction.");
+                return;
+            }
+
+            // Deduct amount and fee from sender's balance
+            this.balances[senderPublicKey] -= (transaction.amount + transaction.fee);
+            // Add the amount to the payee's balance
+            this.balances[transaction.payee] = (this.balances[transaction.payee] || 0) + transaction.amount;
+
             const newBlock = new Block(this.lastBlock.hash, transaction);
-            this.mine(newBlock.numOnlyUsedOnce);
+            this.mine(newBlock.numOnlyUsedOnce, minerPublicKey);
             this.chain.push(newBlock);
+
+            // Give the fee to the miner
+            this.balances[minerPublicKey] = (this.balances[minerPublicKey] || 0) + transaction.fee;
         }
     }
+
+    // Check the balance of a specific public key
+    checkBalance(publicKey) {
+        return this.balances[publicKey] || 0;
+    }
 }
+
 // Singleton instance as we only want 1 chain ..
 Chain.instance = new Chain();
+
 // Wallet class
 class Wallet {
     // Generate key pair when a new wallet is created
@@ -105,20 +146,34 @@ class Wallet {
         });
         this.privateKey = keypair.privateKey;
         this.publicKey = keypair.publicKey;
+        Chain.instance.balances[this.publicKey] = 100; // Starting balance for new wallets
     }
-    // Send money from users wallet to another
+
+    // Send money from user's wallet to another
     sendMoney(amount, payeePublicKey) {
         const transaction = new Transaction(amount, this.publicKey, payeePublicKey);
         const sign = crypto.createSign('SHA256');
         sign.update(transaction.toString()).end();
         const signature = sign.sign(this.privateKey);
-        Chain.instance.addBlock(transaction, this.publicKey, signature);
+        Chain.instance.addBlock(transaction, this.publicKey, signature, this.publicKey);
+    }
+
+    // Check wallet balance
+    get balance() {
+        return Chain.instance.checkBalance(this.publicKey);
     }
 }
-const agp = new Wallet();
-const jz = new Wallet();
-const jb = new Wallet();
-agp.sendMoney(50, jz.publicKey);
-jz.sendMoney(23, jb.publicKey);
-jb.sendMoney(5, jz.publicKey);
+
+// Usage example
+const miner = new Wallet();  // Miner wallet
+const alice = new Wallet();
+const bob = new Wallet();
+
+alice.sendMoney(50, bob.publicKey);  // Alice sends money to Bob
+bob.sendMoney(20, alice.publicKey);  // Bob sends money back to Alice
+miner.sendMoney(10, alice.publicKey);  // Miner sends money to Alice
+
+console.log("Alice's Balance:", alice.balance);
+console.log("Bob's Balance:", bob.balance);
+console.log("Miner's Balance:", miner.balance);
 console.log(Chain.instance);
