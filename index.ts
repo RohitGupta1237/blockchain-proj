@@ -1,15 +1,20 @@
-import * as crypto from 'crypto'
+import * as crypto from 'crypto';
 
-// Transaction class...
+// Constants
+const MINING_REWARD = 50;  // Reward for mining a block
+const TRANSACTION_FEE = 2; // Transaction fee for each transaction
+
+// Transaction class
 class Transaction {
 
     constructor(
         public amount: number,
-        public payer: string,
-        public payee: string
+        public payer: string,      // Public key of sender
+        public payee: string,      // Public key of recipient
+        public fee: number = TRANSACTION_FEE // Fee charged for transaction
     ) {}
 
-    // Serialise transaction as a string
+    // Serialize transaction as a string
     toString() {
         return JSON.stringify(this);
     }
@@ -32,7 +37,7 @@ class Block {
         const str = JSON.stringify(this);
         const hash = crypto.createHash('SHA256');
         hash.update(str).end();
-        return hash.digest('hex')
+        return hash.digest('hex');
     }
 }
 
@@ -45,6 +50,15 @@ class Chain {
     // The chain is a series of linked blocks
     chain: Block[];
 
+    // Track balances for wallets
+    balances: { [key: string]: number } = {};
+
+    // Mining reward and transaction fee
+    miningReward = MINING_REWARD;
+
+    // Difficulty level for mining (more zeros at the beginning of hash)
+    difficulty = 4;
+
     // Create genesis block
     constructor() {
         this.chain = [new Block('', new Transaction(100, 'genesis', 'godwin'))];
@@ -56,31 +70,31 @@ class Chain {
     }
 
     // Mine a block to confirm it as a transaction on the blockchain
-    mine(numOnlyUsedOnce: number) {
+    mine(numOnlyUsedOnce: number, minerPublicKey: string) {
         let solution = 1;
-        console.log('🐢 Mining transaction...')
+        console.log('⛏️ Mining transaction...');
 
-        // Keep looping until solution is found
-        while(true) {
+        while (true) {
             const hash = crypto.createHash('MD5');
             hash.update((numOnlyUsedOnce + solution).toString()).end();
 
-            const attempt = hash.digest('hex')
+            const attempt = hash.digest('hex');
 
             // Add more 0's to make it harder
-            if (attempt.substr(0, 4) === '0000'){
-                console.log(`---> Solved transaction with solution: ${solution}. Block is confirmed!\n`);
-                return solution
+            if (attempt.substr(0, this.difficulty) === '0'.repeat(this.difficulty)) {
+                console.log(`✔️ Solved transaction with solution: ${solution}. Block is confirmed!\n`);
+                this.balances[minerPublicKey] = (this.balances[minerPublicKey] || 0) + MINING_REWARD;
+                return solution;
             }
 
-            solution += 1
+            solution += 1;
         }
     }
 
     // Add a block to the blockchain
-    addBlock(transaction: Transaction, senderPublicKey: string, signature: Buffer) {
+    addBlock(transaction: Transaction, senderPublicKey: string, signature: Buffer, minerPublicKey: string) {
 
-        console.log("🐢 Sending TurtleCoin...")
+        console.log("📤 Processing transaction...");
 
         // Verify a transaction before adding it
         const verifier = crypto.createVerify('SHA256');
@@ -88,12 +102,44 @@ class Chain {
 
         const isValid = verifier.verify(senderPublicKey, signature);
 
-        // If it is valid, create a block, mine it and add it to the blockchain
         if (isValid) {
-            console.log("🐢 Transaction is valid!")
+            console.log("✅ Transaction is valid!");
+
+            // Check if sender has enough balance
+            if (!this.balances[senderPublicKey] || this.balances[senderPublicKey] < (transaction.amount + transaction.fee)) {
+                console.log("❌ Insufficient balance for transaction.");
+                return;
+            }
+
+            // Deduct amount and fee from sender's balance
+            this.balances[senderPublicKey] -= (transaction.amount + transaction.fee);
+            // Add amount to payee's balance
+            this.balances[transaction.payee] = (this.balances[transaction.payee] || 0) + transaction.amount;
+
+            // Create a new block
             const newBlock = new Block(this.lastBlock.hash, transaction);
-            this.mine(newBlock.numOnlyUsedOnce);
+            this.mine(newBlock.numOnlyUsedOnce, minerPublicKey);
             this.chain.push(newBlock);
+
+            // Miner receives the transaction fee
+            this.balances[minerPublicKey] = (this.balances[minerPublicKey] || 0) + transaction.fee;
+        }
+    }
+
+    // Check balance for a specific public key
+    getBalance(publicKey: string) {
+        return this.balances[publicKey] || 0;
+    }
+
+    // View the entire chain (for displaying transaction history)
+    getChain() {
+        return this.chain;
+    }
+
+    // Adjust mining difficulty over time
+    adjustDifficulty() {
+        if (this.chain.length % 5 === 0) {
+            this.difficulty += 1;
         }
     }
 }
@@ -114,6 +160,9 @@ class Wallet {
 
         this.privateKey = keypair.privateKey;
         this.publicKey = keypair.publicKey;
+
+        // Assign an initial balance for new wallets
+        Chain.instance.balances[this.publicKey] = 100; // Default starting balance
     }
 
     // Send money from users wallet to another
@@ -124,16 +173,31 @@ class Wallet {
         sign.update(transaction.toString()).end();
 
         const signature = sign.sign(this.privateKey);
-        Chain.instance.addBlock(transaction, this.publicKey, signature);
+        Chain.instance.addBlock(transaction, this.publicKey, signature, this.publicKey);
+    }
+
+    // Check wallet balance
+    getBalance() {
+        return Chain.instance.getBalance(this.publicKey);
+    }
+
+    // View transaction history
+    getTransactionHistory() {
+        return Chain.instance.getChain();
     }
 }
 
-const agp = new Wallet();
-const jz = new Wallet();
-const jb = new Wallet();
+// Test the system
+const miner = new Wallet();
+const alice = new Wallet();
+const bob = new Wallet();
 
-agp.sendMoney(50, jz.publicKey);
-jz.sendMoney(23, jb.publicKey);
-jb.sendMoney(5, jz.publicKey);
+alice.sendMoney(50, bob.publicKey);  // Alice sends money to Bob
+bob.sendMoney(20, alice.publicKey);  // Bob sends money back to Alice
 
-console.log(Chain.instance)
+console.log("Alice's Balance:", alice.getBalance());
+console.log("Bob's Balance:", bob.getBalance());
+console.log("Miner's Balance:", miner.getBalance());
+
+// View the entire chain (transaction history)
+console.log("Blockchain Transaction History:", miner.getTransactionHistory());
