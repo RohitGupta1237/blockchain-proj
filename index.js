@@ -31,7 +31,9 @@ class Transaction {
         this.payer = payer;
         this.payee = payee;
         this.fee = fee;
+        this.timestamp = Date.now();
     }
+
     // Serialise transaction as a string
     toString() {
         return JSON.stringify(this);
@@ -44,10 +46,10 @@ class Block {
         this.prevHash = prevHash;
         this.transaction = transaction;
         this.ts = ts;
-        // Number only used once, used as the solution for mining
         this.numOnlyUsedOnce = Math.round(Math.random() * 999999999);
         this.minerReward = MINING_REWARD;
     }
+
     // Getter method to return a hash of this block
     get hash() {
         const str = JSON.stringify(this);
@@ -59,7 +61,6 @@ class Block {
 
 // Chain class
 class Chain {
-    // Create genesis block
     constructor() {
         this.chain = [new Block('', new Transaction(100, 'genesis', 'godwin'))];
         this.difficulty = 4; // Adjustable difficulty level
@@ -81,12 +82,12 @@ class Chain {
     }
 
     // Mine a block to confirm it as a transaction on the blockchain
-    mine(numOnlyUsedOnce, minerPublicKey) {
+    mine(minerPublicKey) {
         let solution = 1;
         console.log('⛏️ Mining block...');
         while (true) {
             const hash = crypto.createHash('MD5');
-            hash.update((numOnlyUsedOnce + solution).toString()).end();
+            hash.update((this.pendingTransactions.length + solution).toString()).end();
             const attempt = hash.digest('hex');
             if (attempt.substr(0, this.difficulty) === '0'.repeat(this.difficulty)) {
                 console.log(`Solved transaction with solution: ${solution}. Block is confirmed!`);
@@ -96,6 +97,25 @@ class Chain {
             }
             solution += 1;
         }
+    }
+
+    // Add a transaction to the pool
+    addTransaction(transaction) {
+        console.log("📤 Adding Transaction to Pool...");
+        this.pendingTransactions.push(transaction);
+    }
+
+    // Process all pending transactions
+    processTransactions(minerPublicKey) {
+        if (this.pendingTransactions.length === 0) {
+            console.log("❌ No transactions to process.");
+            return;
+        }
+
+        const newBlock = new Block(this.lastBlock.hash, this.pendingTransactions);
+        this.mine(minerPublicKey);
+        this.chain.push(newBlock);
+        this.pendingTransactions = []; // Clear the pool after mining
     }
 
     // Add a block to the blockchain
@@ -117,12 +137,8 @@ class Chain {
             // Add the amount to the payee's balance
             this.balances[transaction.payee] = (this.balances[transaction.payee] || 0) + transaction.amount;
 
-            const newBlock = new Block(this.lastBlock.hash, transaction);
-            this.mine(newBlock.numOnlyUsedOnce, minerPublicKey);
-            this.chain.push(newBlock);
-
-            // Give the fee to the miner
-            this.balances[minerPublicKey] = (this.balances[minerPublicKey] || 0) + transaction.fee;
+            this.addTransaction(transaction); // Add transaction to the pool
+            this.processTransactions(minerPublicKey); // Process the transactions
         }
     }
 
