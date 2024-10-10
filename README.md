@@ -1,3 +1,5 @@
+##Steps to Run the Project:
+
 Install Dependencies: Make sure you have Node.js installed. Then create a new project and install necessary modules:
 
 mkdir blockchain-project
