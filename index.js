@@ -26,17 +26,27 @@ const TRANSACTION_FEE = 2;  // Fee paid to miners for processing the transaction
 
 // Transaction class
 class Transaction {
-    constructor(amount, payer, payee, fee = TRANSACTION_FEE) {
+    constructor(amount, payer, payee, fee = TRANSACTION_FEE, multiSigSigners = []) {
         this.amount = amount;
         this.payer = payer;
         this.payee = payee;
         this.fee = fee;
         this.timestamp = Date.now();
+        this.multiSigSigners = multiSigSigners;  // List of signers in multi-sig transactions
     }
 
     // Serialise transaction as a string
     toString() {
         return JSON.stringify(this);
+    }
+
+    // Validate the transaction signature (for multi-sig)
+    validateSignatures(signatures, requiredSignatures) {
+        if (signatures.length < requiredSignatures) {
+            console.log(`❌ Transaction failed: Need at least ${requiredSignatures} signatures.`);
+            return false;
+        }
+        return true;
     }
 }
 
@@ -67,6 +77,7 @@ class Chain {
         this.pendingTransactions = [];
         this.miningReward = MINING_REWARD;
         this.balances = {};  // Track wallet balances
+        this.transactionHistory = {};  // Transaction history for each address
     }
 
     // Return the last block in the chain
@@ -146,6 +157,14 @@ class Chain {
     checkBalance(publicKey) {
         return this.balances[publicKey] || 0;
     }
+
+    // Fork handling (reverts to the longest valid chain in case of a conflict)
+    handleFork(newChain) {
+        if (newChain.chain.length > this.chain.length) {
+            console.log("⛔ Fork detected. Reverting to the longest chain...");
+            this.chain = newChain.chain;
+        }
+    }
 }
 
 // Singleton instance as we only want 1 chain ..
@@ -166,8 +185,8 @@ class Wallet {
     }
 
     // Send money from user's wallet to another
-    sendMoney(amount, payeePublicKey) {
-        const transaction = new Transaction(amount, this.publicKey, payeePublicKey);
+    sendMoney(amount, payeePublicKey, multiSigSigners = []) {
+        const transaction = new Transaction(amount, this.publicKey, payeePublicKey, TRANSACTION_FEE, multiSigSigners);
         const sign = crypto.createSign('SHA256');
         sign.update(transaction.toString()).end();
         const signature = sign.sign(this.privateKey);
