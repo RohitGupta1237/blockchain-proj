@@ -1,11 +1,13 @@
 import * as crypto from 'crypto';
 import * as net from 'net';
 import * as readline from 'readline';
+import * as fs from 'fs';
 
 // Constants
 const MINING_REWARD = 50; // Reward for mining a block
 const TRANSACTION_FEE = 2; // Transaction fee for each transaction
 const DIFFICULTY_ADJUSTMENT_INTERVAL = 5; // Interval for difficulty adjustment
+const WALLET_BACKUP_FILE = 'walletBackup.json'; // File to store wallet backup
 
 // Transaction class
 class Transaction {
@@ -14,12 +16,28 @@ class Transaction {
         public payer: string, // Public key of sender
         public payee: string, // Public key of recipient
         public fee: number = TRANSACTION_FEE, // Fee charged for transaction
-        public timestamp: number = Date.now() // Timestamp for transaction
+        public timestamp: number = Date.now(), // Timestamp for transaction
+        public signature?: string // Optional: Signature of transaction
     ) {}
 
     // Serialize transaction as a string
     toString() {
         return JSON.stringify(this);
+    }
+
+    // Sign transaction with private key
+    sign(privateKey: string) {
+        const sign = crypto.createSign('SHA256');
+        sign.update(this.toString()).end();
+        this.signature = sign.sign(privateKey, 'hex');
+    }
+
+    // Verify transaction signature
+    verify() {
+        if (!this.signature) return false;
+        const verify = crypto.createVerify('SHA256');
+        verify.update(this.toString()).end();
+        return verify.verify(this.payer, this.signature, 'hex');
     }
 }
 
@@ -50,6 +68,7 @@ class Chain {
     public miningReward = MINING_REWARD;
     public difficulty = 4; // Adjustable difficulty level
     private pendingTransactions: Transaction[] = [];
+    private lastAdjustmentTime = Date.now();
 
     constructor() {
         this.chain = [new Block('', new Transaction(100, 'genesis', 'godwin'))];
@@ -80,6 +99,11 @@ class Chain {
 
     addTransaction(transaction: Transaction) {
         // Validate transaction
+        if (!transaction.verify()) {
+            console.log("❌ Invalid transaction signature.");
+            return false;
+        }
+
         if (!this.balances[transaction.payer] || this.balances[transaction.payer] < (transaction.amount + transaction.fee)) {
             console.log("❌ Insufficient balance for transaction.");
             return false;
@@ -116,9 +140,15 @@ class Chain {
     }
 
     adjustDifficulty() {
-        if (this.chain.length % DIFFICULTY_ADJUSTMENT_INTERVAL === 0) {
-            this.difficulty += 1; // Increase difficulty every 5 blocks
+        const now = Date.now();
+        const timeTaken = now - this.lastAdjustmentTime;
+        const timePerBlock = timeTaken / this.chain.length;
+
+        if (this.chain.length % DIFFICULTY_ADJUSTMENT_INTERVAL === 0 && timePerBlock > 10000) {
+            this.difficulty += 1; // Increase difficulty if block time is too high
+            console.log("Increasing difficulty.");
         }
+        this.lastAdjustmentTime = now;
     }
 }
 
@@ -141,9 +171,7 @@ class Wallet {
 
     sendMoney(amount: number, payeePublicKey: string) {
         const transaction = new Transaction(amount, this.publicKey, payeePublicKey);
-        const sign = crypto.createSign('SHA256');
-        sign.update(transaction.toString()).end();
-        const signature = sign.sign(this.privateKey);
+        transaction.sign(this.privateKey);
 
         // Add transaction to the chain
         if (Chain.instance.addTransaction(transaction)) {
@@ -157,6 +185,24 @@ class Wallet {
 
     getTransactionHistory() {
         return Chain.instance.getChain();
+    }
+
+    backupWallet() {
+        const backupData = {
+            publicKey: this.publicKey,
+            privateKey: this.privateKey,
+        };
+        fs.writeFileSync(WALLET_BACKUP_FILE, JSON.stringify(backupData));
+        console.log("Wallet backed up successfully.");
+    }
+
+    static restoreWallet() {
+        const backupData = fs.readFileSync(WALLET_BACKUP_FILE, 'utf-8');
+        const { publicKey, privateKey } = JSON.parse(backupData);
+        const restoredWallet = new Wallet();
+        restoredWallet.publicKey = publicKey;
+        restoredWallet.privateKey = privateKey;
+        return restoredWallet;
     }
 }
 
@@ -215,7 +261,7 @@ peer.connectToPeer('localhost', 3001);
 
 // Command-line interaction
 function promptUser() {
-    rl.question('Enter command (send [amount] [recipient] / balance / history / exit): ', (input) => {
+    rl.question('Enter command (send [amount] [recipient] / balance / history / backup / restore / exit): ', (input) => {
         const args = input.split(' ');
 
         if (args[0] === 'send') {
@@ -228,6 +274,11 @@ function promptUser() {
             console.log(`Bob's Balance: ${bob.getBalance()}`);
         } else if (args[0] === 'history') {
             console.log("Blockchain Transaction History:", miner.getTransactionHistory());
+        } else if (args[0] === 'backup') {
+            miner.backupWallet();
+        } else if (args[0] === 'restore') {
+            const restoredWallet = Wallet.restoreWallet();
+            console.log("Wallet restored:", restoredWallet.publicKey);
         } else if (args[0] === 'exit') {
             rl.close();
             process.exit(0);
